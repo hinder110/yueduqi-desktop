@@ -17,13 +17,19 @@ export default function ChaptersPage() {
   const [shelfItem, setShelfItem] = useState<BookshelfItem | null>(null);
 
   useEffect(() => {
+    console.log('[ChaptersPage] book:', JSON.stringify(book));
     if (!book) {
+      console.log('[ChaptersPage] no book, redirecting');
       navigate('/', { replace: true });
       return;
     }
     chapters.execute(() => fetchChapters(book.bookId, book.sourceKey, book.source, book.tab));
     if (user) loadShelfInfo();
   }, []);
+
+  useEffect(() => {
+    console.log('[ChaptersPage] chapters.data:', chapters.data?.length, 'error:', chapters.error, 'loading:', chapters.loading);
+  }, [chapters.data, chapters.error, chapters.loading]);
 
   async function loadShelfInfo() {
     if (!book || !user) return;

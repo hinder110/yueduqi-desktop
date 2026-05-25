@@ -14,13 +14,29 @@ export async function fetchHotBooks(): Promise<any> {
 }
 
 export async function fetchChapters(bookId: string, _sourceKey?: string, _is?: string, _it?: string): Promise<any> {
-  try { const data = await GetChapters(bookId); return ok(data); }
-  catch (e: any) { return fail(e?.message || '获取章节失败'); }
+  console.log('[fetchChapters] bookId:', bookId);
+  try {
+    const data = await GetChapters(bookId);
+    console.log('[fetchChapters] result:', JSON.stringify(data).slice(0, 200));
+    return ok(data);
+  }
+  catch (e: any) {
+    console.error('[fetchChapters] error:', e?.message || e);
+    return fail(e?.message || '获取章节失败');
+  }
 }
 
 export async function fetchContent(bookId: string, itemId: string, _sourceKey?: string, _is?: string, _it?: string): Promise<any> {
-  try { const data = await GetChapterContent(bookId, itemId); return ok(data); }
-  catch (e: any) { return fail(e?.message || '获取正文失败'); }
+  console.log('[fetchContent] bookId:', bookId, 'itemId:', itemId);
+  try {
+    const data = await GetChapterContent(bookId, itemId);
+    console.log('[fetchContent] result:', JSON.stringify(data).slice(0, 200));
+    return ok(data);
+  }
+  catch (e: any) {
+    console.error('[fetchContent] error:', e?.message || e);
+    return fail(e?.message || '获取正文失败');
+  }
 }
 
 export async function login(_u?: string, _p?: string): Promise<any> { return ok({ token: 'desktop', user: { id: 'local', username: 'local' } }); }
