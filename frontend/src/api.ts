@@ -13,10 +13,10 @@ export async function fetchHotBooks(): Promise<any> {
   catch (e: any) { return fail(e?.message || '获取热门推荐失败'); }
 }
 
-export async function fetchChapters(bookId: string, _sourceKey?: string, _is?: string, _it?: string): Promise<any> {
+export async function fetchChapters(bookId: string, sourceKey?: string, innerSource?: string, innerTab?: string): Promise<any> {
   console.log('[fetchChapters] bookId:', bookId);
   try {
-    const data = await GetChapters(bookId);
+    const data = await GetChapters(bookId, sourceKey || 'guangyu', innerSource || '', innerTab || '');
     console.log('[fetchChapters] result:', JSON.stringify(data).slice(0, 200));
     return ok(data);
   }
@@ -26,10 +26,10 @@ export async function fetchChapters(bookId: string, _sourceKey?: string, _is?: s
   }
 }
 
-export async function fetchContent(bookId: string, itemId: string, _sourceKey?: string, _is?: string, _it?: string): Promise<any> {
+export async function fetchContent(bookId: string, itemId: string, sourceKey?: string, innerSource?: string, innerTab?: string): Promise<any> {
   console.log('[fetchContent] bookId:', bookId, 'itemId:', itemId);
   try {
-    const data = await GetChapterContent(bookId, itemId);
+    const data = await GetChapterContent(bookId, itemId, sourceKey || 'guangyu', innerSource || '', innerTab || '');
     console.log('[fetchContent] result:', JSON.stringify(data).slice(0, 200));
     return ok(data);
   }

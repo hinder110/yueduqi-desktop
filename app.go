@@ -47,16 +47,20 @@ func (a *App) GetHotBooks() ([]model.Book, error) {
 	return books, err
 }
 
-func (a *App) GetChapters(bookID string) ([]model.Chapter, error) {
-	logger.Printf("GetChapters called: bookID=%q", bookID)
-	chapters, err := parser.ForSource("guangyu").GetChapters(a.ctx, bookID, "番茄", "小说")
+func (a *App) GetChapters(bookID string, source string, innerSource string, innerTab string) ([]model.Chapter, error) {
+	logger.Printf("GetChapters called: bookID=%q source=%q innerSource=%q innerTab=%q", bookID, source, innerSource, innerTab)
+	if innerSource == "" { innerSource = "番茄" }
+	if innerTab == "" { innerTab = "小说" }
+	chapters, err := parser.ForSource(source).GetChapters(a.ctx, bookID, innerSource, innerTab)
 	logger.Printf("GetChapters result: %d chapters, err=%v", len(chapters), err)
 	return chapters, err
 }
 
-func (a *App) GetChapterContent(bookID, itemID string) (model.ChapterContent, error) {
-	logger.Printf("GetChapterContent called: bookID=%q itemID=%q", bookID, itemID)
-	content, err := parser.ForSource("guangyu").GetChapterContent(a.ctx, bookID, itemID, "番茄", "小说")
+func (a *App) GetChapterContent(bookID, itemID string, source string, innerSource string, innerTab string) (model.ChapterContent, error) {
+	logger.Printf("GetChapterContent called: bookID=%q itemID=%q source=%q innerSource=%q innerTab=%q", bookID, itemID, source, innerSource, innerTab)
+	if innerSource == "" { innerSource = "番茄" }
+	if innerTab == "" { innerTab = "小说" }
+	content, err := parser.ForSource(source).GetChapterContent(a.ctx, bookID, itemID, innerSource, innerTab)
 	logger.Printf("GetChapterContent result: title=%q, len=%d, err=%v", content.Title, len(content.Content), err)
 	return content, err
 }
