@@ -14,6 +14,6 @@ export function GetHotBooks() {
   return window['go']['main']['App']['GetHotBooks']();
 }
 
-export function SearchBooks(arg1) {
-  return window['go']['main']['App']['SearchBooks'](arg1);
+export function SearchBooks(arg1, arg2) {
+  return window['go']['main']['App']['SearchBooks'](arg1, arg2);
 }

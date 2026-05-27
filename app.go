@@ -33,9 +33,9 @@ func (a *App) startup(ctx context.Context) {
 	logger.Println("startup called, ctx set")
 }
 
-func (a *App) SearchBooks(keyword string) ([]model.Book, error) {
-	logger.Printf("SearchBooks called: keyword=%q", keyword)
-	books, err := parser.ForSource("guangyu").SearchBooks(a.ctx, keyword)
+func (a *App) SearchBooks(keyword string, source string) ([]model.Book, error) {
+	logger.Printf("SearchBooks called: keyword=%q source=%q", keyword, source)
+	books, err := parser.ForSource(source).SearchBooks(a.ctx, keyword)
 	logger.Printf("SearchBooks result: %d books, err=%v", len(books), err)
 	return books, err
 }

@@ -8,4 +8,4 @@ export function GetChapters(arg1:string):Promise<Array<model.Chapter>>;
 
 export function GetHotBooks():Promise<Array<model.Book>>;
 
-export function SearchBooks(arg1:string):Promise<Array<model.Book>>;
+export function SearchBooks(arg1:string,arg2:string):Promise<Array<model.Book>>;

@@ -3,8 +3,8 @@ import { SearchBooks, GetHotBooks, GetChapters, GetChapterContent } from '../wai
 function ok<T>(data: T) { return { success: true as const, data }; }
 function fail(error: string) { return { success: false as const, error }; }
 
-export async function fetchSearch(keyword: string, _sourceKey?: string): Promise<any> {
-  try { const data = await SearchBooks(keyword); return ok(data); }
+export async function fetchSearch(keyword: string, sourceKey?: string): Promise<any> {
+  try { const data = await SearchBooks(keyword, sourceKey || 'guangyu'); return ok(data); }
   catch (e: any) { return fail(e?.message || '搜索失败'); }
 }
 
