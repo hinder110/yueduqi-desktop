@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"yueduqi-desktop/cache"
 	"yueduqi-desktop/model"
 )
 
@@ -24,35 +25,67 @@ var hosts = []string{
 	"https://v7.gyks.cf",
 }
 
-var httpClient = &http.Client{Timeout: 15 * time.Second}
+// Per-operation deadlines, shorter than the client-wide fallback.
+const (
+	searchTimeout  = 8 * time.Second
+	contentTimeout = 20 * time.Second
+)
+
+// Shared transport with connection pooling limits to avoid overwhelming
+// upstream hosts and to keep idle connections alive across requests.
+var httpClient = &http.Client{
+	Timeout: 15 * time.Second,
+	Transport: &http.Transport{
+		MaxIdleConns:    10,
+		IdleConnTimeout: 90 * time.Second,
+		MaxConnsPerHost: 5,
+	},
+}
 
 type GuangyuParser struct{}
 
+func init() {
+	Register("guangyu", &GuangyuParser{})
+}
+
 func (p *GuangyuParser) SearchBooks(ctx context.Context, keyword string) ([]model.Book, error) {
-	return tryAllHosts(ctx, func(baseURL string) ([]model.Book, error) {
+	// Cache keyed by keyword only — source/tab are hardcoded to 番茄/小说 in this parser.
+	if books, ok := cache.Search.Get(keyword); ok {
+		return books, nil
+	}
+	books, err := tryAllHosts(ctx, func(baseURL string) ([]model.Book, error) {
 		reqURL := baseURL + "/search?" + url.Values{
-			"title":           {keyword},
-			"tab":             {"小说"},
-			"source":          {"番茄"},
-			"page":            {"1"},
+			"title":            {keyword},
+			"tab":              {"小说"},
+			"source":           {"番茄"},
+			"page":             {"1"},
 			"disabled_sources": {"0"},
 		}.Encode()
 
-		req, _ := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+		// Per-operation deadline so search cannot hang past this window.
+		reqCtx, cancel := context.WithTimeout(ctx, searchTimeout)
+		defer cancel()
+
+		req, err := http.NewRequestWithContext(reqCtx, "GET", reqURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("creating search request: %w", err)
+		}
 		resp, err := httpClient.Do(req)
 		if err != nil {
 			return nil, err
 		}
 		defer resp.Body.Close()
 
-		var result struct {
-			Data []mapItem `json:"data"`
-		}
+		var result searchResponse
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return nil, err
 		}
 		return mapBookList(result.Data), nil
 	})
+	if err == nil {
+		cache.Search.Set(keyword, books)
+	}
+	return books, err
 }
 
 func (p *GuangyuParser) GetChapters(ctx context.Context, bookID, innerSource, innerTab string) ([]model.Chapter, error) {
@@ -63,16 +96,17 @@ func (p *GuangyuParser) GetChapters(ctx context.Context, bookID, innerSource, in
 			"tab":     {innerTab},
 		}.Encode()
 
-		req, _ := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("creating catalog request: %w", err)
+		}
 		resp, err := httpClient.Do(req)
 		if err != nil {
 			return nil, err
 		}
 		defer resp.Body.Close()
 
-		var result struct {
-			Data []mapItem `json:"data"`
-		}
+		var result catalogResponse
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return nil, err
 		}
@@ -80,8 +114,8 @@ func (p *GuangyuParser) GetChapters(ctx context.Context, bookID, innerSource, in
 		chapters := make([]model.Chapter, 0, len(result.Data))
 		for _, item := range result.Data {
 			chapters = append(chapters, model.Chapter{
-				Title:  str(item["title"]),
-				ItemID: str(item["item_id"]),
+				Title:  item.Title,
+				ItemID: item.ItemID,
 			})
 		}
 		return chapters, nil
@@ -96,7 +130,14 @@ func (p *GuangyuParser) GetChapterContent(ctx context.Context, bookID, itemID, i
 			url.QueryEscape(innerTab),
 		)
 
-		req, _ := http.NewRequestWithContext(ctx, "POST", baseURL+"/content", strings.NewReader(body))
+		// Per-operation deadline so content fetch cannot hang past this window.
+		reqCtx, cancel := context.WithTimeout(ctx, contentTimeout)
+		defer cancel()
+
+		req, err := http.NewRequestWithContext(reqCtx, "POST", baseURL+"/content", strings.NewReader(body))
+		if err != nil {
+			return model.ChapterContent{}, fmt.Errorf("creating content request: %w", err)
+		}
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		resp, err := httpClient.Do(req)
 		if err != nil {
@@ -104,11 +145,11 @@ func (p *GuangyuParser) GetChapterContent(ctx context.Context, bookID, itemID, i
 		}
 		defer resp.Body.Close()
 
-		raw, _ := io.ReadAll(resp.Body)
-		var result struct {
-			Title   string `json:"title"`
-			Content string `json:"content"`
+		raw, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return model.ChapterContent{}, fmt.Errorf("reading content body: %w", err)
 		}
+		var result contentResponse
 		if err := json.Unmarshal(raw, &result); err != nil {
 			return model.ChapterContent{}, err
 		}
@@ -124,14 +165,45 @@ func (p *GuangyuParser) GetChapterContent(ctx context.Context, bookID, itemID, i
 	})
 }
 
-// --- helpers ---
+// --- API response types ---
 
-type mapItem map[string]any
-
-func str(v any) string {
-	s, _ := v.(string)
-	return s
+// searchResponse decodes the /search endpoint JSON. Also shared by
+// hot.go's /get_discover because both return the same book-item shape.
+type searchResponse struct {
+	Data []searchBookItem `json:"data"`
 }
+
+type searchBookItem struct {
+	BookName              string `json:"book_name"`
+	Author                string `json:"author"`
+	ThumbURL              string `json:"thumb_url"`
+	Abstract              string `json:"abstract"`
+	Status                string `json:"status"`
+	Score                 string `json:"score"`
+	Tags                  string `json:"tags"`
+	LastChapterUpdateTime string `json:"last_chapter_update_time"`
+	Source                string `json:"source"`
+	LastChapterTitle      string `json:"last_chapter_title"`
+	WordNumber            string `json:"word_number"`
+	BookID                string `json:"book_id"`
+	Tab                   string `json:"tab"`
+}
+
+type catalogResponse struct {
+	Data []catalogItem `json:"data"`
+}
+
+type catalogItem struct {
+	Title  string `json:"title"`
+	ItemID string `json:"item_id"`
+}
+
+type contentResponse struct {
+	Title   string `json:"title"`
+	Content string `json:"content"`
+}
+
+// --- helpers ---
 
 func tryAllHosts[T any](ctx context.Context, fn func(string) (T, error)) (T, error) {
 	ctx, cancel := context.WithCancel(ctx)
@@ -141,15 +213,16 @@ func tryAllHosts[T any](ctx context.Context, fn func(string) (T, error)) (T, err
 		val T
 		err error
 	}
+	// Buffered to capacity so every goroutine can send without blocking,
+	// even after we return early on the first success. This avoids the
+	// deadlock where cancel() causes remaining goroutines to skip their
+	// send, leaving the drain loop hung on a channel that will never fill.
 	ch := make(chan result, len(hosts))
 
 	for _, host := range hosts {
 		go func(h string) {
 			val, err := fn(h)
-			select {
-			case ch <- result{val, err}:
-			case <-ctx.Done():
-			}
+			ch <- result{val, err}
 		}(host)
 	}
 
@@ -172,21 +245,21 @@ func cleanBookName(name string) string {
 	return strings.TrimSpace(nameCleanRe.ReplaceAllString(name, ""))
 }
 
-func mapBookList(items []mapItem) []model.Book {
+func mapBookList(items []searchBookItem) []model.Book {
 	books := make([]model.Book, 0, len(items))
 	for _, item := range items {
 		books = append(books, model.Book{
-			Title:       cleanBookName(str(item["book_name"])),
-			Author:      str(item["author"]),
-			Cover:       str(item["thumb_url"]),
-			Intro:       str(item["abstract"]),
-			Kind:        joinNonEmpty([]string{str(item["status"]), str(item["score"]), str(item["tags"]), str(item["last_chapter_update_time"])}, " / "),
-			LastChapter: strings.TrimSpace(str(item["source"]) + " " + str(item["last_chapter_title"])),
-			WordCount:   str(item["word_number"]),
-			BookID:      str(item["book_id"]),
+			Title:       cleanBookName(item.BookName),
+			Author:      item.Author,
+			Cover:       item.ThumbURL,
+			Intro:       item.Abstract,
+			Kind:        joinNonEmpty([]string{item.Status, item.Score, item.Tags, item.LastChapterUpdateTime}, " / "),
+			LastChapter: strings.TrimSpace(item.Source + " " + item.LastChapterTitle),
+			WordCount:   item.WordNumber,
+			BookID:      item.BookID,
 			SourceKey:   "guangyu",
-			Source:      str(item["source"]),
-			Tab:         str(item["tab"]),
+			Source:      item.Source,
+			Tab:         item.Tab,
 		})
 	}
 	return books
@@ -202,26 +275,14 @@ func joinNonEmpty(parts []string, sep string) string {
 	return strings.Join(filtered, sep)
 }
 
-var adPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`打赏`),
-	regexp.MustCompile(`非\s*[Vv][Ii][Pp]\s*用户`),
-	regexp.MustCompile(`[Vv][Ii][Pp]\s*服务器`),
-	regexp.MustCompile(`开通\s*[Vv][Ii][Pp]`),
-	regexp.MustCompile(`封禁`),
-	regexp.MustCompile(`(?i)电报群|t\.me`),
-	regexp.MustCompile(`(?i)telegram`),
-	regexp.MustCompile(`联系作者`),
-	regexp.MustCompile(`后台页面`),
-	regexp.MustCompile(`(?i)gmai?l\.com`),
-	regexp.MustCompile(`限时折扣`),
-	regexp.MustCompile(`恢复原价`),
-	regexp.MustCompile(`删除普通账户`),
-	regexp.MustCompile(`服务器压力`),
-	regexp.MustCompile(`纯净`),
-	regexp.MustCompile(`未登录.*访问`),
-	regexp.MustCompile(`已访问.*次`),
-	regexp.MustCompile(`缓存操作`),
-}
+// adRe combines the former adPatterns slice into a single alternation.
+// Aho-Corasick would be faster for large line counts, but the per-line
+// overhead of 18 separate regexp.MatchString calls already dominates;
+// a single combined regex trades some readability for a 1-call-per-line
+// match and is sufficient for the typical chapter length.
+var adRe = regexp.MustCompile(
+	`打赏|非\s*[Vv][Ii][Pp]\s*用户|[Vv][Ii][Pp]\s*服务器|开通\s*[Vv][Ii][Pp]|封禁|(?i)电报群|t\.me|(?i)telegram|联系作者|后台页面|(?i)gmai?l\.com|限时折扣|恢复原价|删除普通账户|服务器压力|纯净|未登录.*访问|已访问.*次|缓存操作`,
+)
 
 var identRe = regexp.MustCompile(`\s*ident="[^"]*"`)
 
@@ -234,14 +295,7 @@ func cleanContent(content string) string {
 		if line == "" {
 			continue
 		}
-		skip := false
-		for _, p := range adPatterns {
-			if p.MatchString(line) {
-				skip = true
-				break
-			}
-		}
-		if skip {
+		if adRe.MatchString(line) {
 			continue
 		}
 		out = append(out, "<p>"+line+"</p>")
