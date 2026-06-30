@@ -417,6 +417,9 @@ body {
   border-bottom: 1px solid var(--border-light);
   cursor: pointer;
   transition: background var(--transition);
+  /* 浏览器跳过屏幕外项目的完整渲染，减少长列表的布局/绘制开销 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 52px;
 }
 
 .chapter-item:hover {

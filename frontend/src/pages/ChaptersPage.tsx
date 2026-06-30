@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { fetchChapters, fetchBookshelf, addToBookshelf } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import { useAsync } from '../hooks/useAsync';
 import StatusMessage from '../components/StatusMessage';
 import type { Book, Chapter, BookshelfItem } from '../types';
+
+// 每次加载的章节数量；用 IntersectionObserver 按需追加，避免大列表卡顿
+const PAGE_SIZE = 50;
 
 export default function ChaptersPage() {
   const location = useLocation();
@@ -15,11 +18,11 @@ export default function ChaptersPage() {
   const chapters = useAsync<Chapter[]>();
   const [addedToShelf, setAddedToShelf] = useState(false);
   const [shelfItem, setShelfItem] = useState<BookshelfItem | null>(null);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    console.log('[ChaptersPage] book:', JSON.stringify(book));
     if (!book) {
-      console.log('[ChaptersPage] no book, redirecting');
       navigate('/', { replace: true });
       return;
     }
@@ -27,9 +30,29 @@ export default function ChaptersPage() {
     if (user) loadShelfInfo();
   }, []);
 
+  // 书籍切换时重置分页
   useEffect(() => {
-    console.log('[ChaptersPage] chapters.data:', chapters.data?.length, 'error:', chapters.error, 'loading:', chapters.loading);
-  }, [chapters.data, chapters.error, chapters.loading]);
+    setVisibleCount(PAGE_SIZE);
+  }, [chapters.data]);
+
+  // IntersectionObserver：哨兵进入视口时加载下一批章节
+  const loadMore = useCallback(() => {
+    setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, chapters.data?.length ?? prev));
+  }, [chapters.data?.length]);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !chapters.data || visibleCount >= chapters.data.length) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) loadMore();
+      },
+      { rootMargin: '200px' },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [visibleCount, chapters.data, loadMore]);
 
   async function loadShelfInfo() {
     if (!book || !user) return;
@@ -119,7 +142,7 @@ export default function ChaptersPage() {
       </div>
 
       <div className="chapter-list">
-        {chapters.data?.map((ch, i) => (
+        {chapters.data?.slice(0, visibleCount).map((ch, i) => (
           <div
             key={ch.itemId}
             className="chapter-item stagger-in"
@@ -139,6 +162,10 @@ export default function ChaptersPage() {
             <span className="chapter-title">{ch.title}</span>
           </div>
         ))}
+        {/* 分页哨兵：进入视口时触发 loadMore */}
+        {chapters.data && visibleCount < chapters.data.length && (
+          <div ref={sentinelRef} style={{ height: 1 }} />
+        )}
       </div>
     </div>
   );

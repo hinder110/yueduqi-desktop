@@ -9,12 +9,22 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"golang.org/x/net/html/charset"
+	"golang.org/x/text/encoding"
 	"golang.org/x/text/transform"
 
 	"yueduqi-desktop/model"
 )
 
 const biqugeBase = "http://m.biquge900.com"
+
+// gbkEnc is cached at package init so charset.Lookup("gbk") is not
+// repeated on every gbkEncode call.
+var gbkEnc encoding.Encoding
+
+func init() {
+	gbkEnc, _ = charset.Lookup("gbk")
+	Register("biquge900", &BiqugeParser{})
+}
 
 type BiqugeParser struct{}
 
@@ -128,29 +138,26 @@ func (p *BiqugeParser) GetChapterContent(ctx context.Context, _, itemID, _, _ st
 // --- helpers ---
 
 func gbkEncode(s string) string {
-	enc, _ := charset.Lookup("gbk")
-	if enc == nil {
+	if gbkEnc == nil {
 		return s
 	}
 	var buf strings.Builder
-	w := transform.NewWriter(&buf, enc.NewEncoder())
+	w := transform.NewWriter(&buf, gbkEnc.NewEncoder())
 	io.WriteString(w, s)
 	w.Close()
 	return buf.String()
 }
 
+// utf8Reader wraps r in a streaming charset → UTF-8 decoder.
+// charset.NewReader peeks only the first ~1 KB to sniff the encoding;
+// the returned reader streams the decoded output without buffering the
+// entire body in memory.
 func utf8Reader(r io.Reader) io.Reader {
-	raw, err := io.ReadAll(r)
+	reader, err := charset.NewReader(r, "")
 	if err != nil {
-		return strings.NewReader("")
+		return r
 	}
-	enc, _, _ := charset.DetermineEncoding(raw, "")
-	if enc != nil {
-		r := transform.NewReader(strings.NewReader(string(raw)), enc.NewDecoder())
-		decoded, _ := io.ReadAll(r)
-		return strings.NewReader(string(decoded))
-	}
-	return strings.NewReader(string(raw))
+	return reader
 }
 
 func toAbsURL(path, base string) string {

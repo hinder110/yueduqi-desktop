@@ -15,6 +15,10 @@ const qixingeBase = "http://www.qixinge.net"
 
 type QixingeParser struct{}
 
+func init() {
+	Register("qixinge", &QixingeParser{})
+}
+
 func (p *QixingeParser) SearchBooks(ctx context.Context, keyword string) ([]model.Book, error) {
 	reqURL := qixingeBase + "/search.php?q=" + url.QueryEscape(keyword) + "&p=1"
 	req, _ := http.NewRequestWithContext(ctx, "GET", reqURL, nil)

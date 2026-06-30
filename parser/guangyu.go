@@ -28,11 +28,15 @@ var hosts = []string{
 // Per-operation deadlines, shorter than the client-wide fallback.
 const (
 	searchTimeout  = 8 * time.Second
-	contentTimeout = 20 * time.Second
+	contentTimeout = 15 * time.Second
 )
 
 // Shared transport with connection pooling limits to avoid overwhelming
 // upstream hosts and to keep idle connections alive across requests.
+// httpClient uses 0 Timeout because each operation applies its own
+// context.WithTimeout (searchTimeout=8s, contentTimeout=20s). The global
+// timeout must be >= the longest per-operation deadline to avoid the
+// client-level deadline cutting short a request the context would allow.
 var httpClient = &http.Client{
 	Timeout: 15 * time.Second,
 	Transport: &http.Transport{

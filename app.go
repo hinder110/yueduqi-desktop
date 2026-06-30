@@ -10,6 +10,7 @@ import (
 	"yueduqi-desktop/config"
 	"yueduqi-desktop/model"
 	"yueduqi-desktop/parser"
+	"yueduqi-desktop/storage"
 )
 
 func init() {
@@ -64,11 +65,17 @@ func parseLogLevel(s string) slog.Level {
 }
 
 type App struct {
-	ctx context.Context
+	ctx   context.Context
+	store storage.Store
 }
 
-func NewApp() *App {
-	return &App{}
+// NewApp creates the application with an optional persistence layer.
+// Pass nil to use an in-memory store (state is lost on restart).
+func NewApp(store storage.Store) *App {
+	if store == nil {
+		store, _ = storage.New("")
+	}
+	return &App{store: store}
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -124,4 +131,61 @@ func (a *App) GetCacheStats() map[string]CacheStats {
 		"search":   {Hits: s, Misses: sm},
 		"chapters": {Hits: ch, Misses: cm},
 	}
+}
+
+// ---- Bookshelf methods -----------------------------------------------------
+
+// AddToBookshelf saves a book to the user's bookshelf.
+// Returns the shelf row id (re-used when the book is already present).
+func (a *App) AddToBookshelf(entry storage.BookshelfEntry) (int64, error) {
+	slog.Info("AddToBookshelf called", "bookID", entry.BookID)
+	id, err := a.store.AddToBookshelf(entry)
+	slog.Info("AddToBookshelf result", "id", id, "err", err)
+	return id, err
+}
+
+// GetBookshelf returns every book on the shelf with its latest reading progress.
+func (a *App) GetBookshelf() ([]storage.BookshelfEntry, error) {
+	slog.Info("GetBookshelf called")
+	entries, err := a.store.GetBookshelf()
+	slog.Info("GetBookshelf result", "count", len(entries), "err", err)
+	return entries, err
+}
+
+// RemoveFromBookshelf deletes a shelf entry and its reading progress.
+func (a *App) RemoveFromBookshelf(id int64) error {
+	slog.Info("RemoveFromBookshelf called", "id", id)
+	err := a.store.RemoveFromBookshelf(id)
+	slog.Info("RemoveFromBookshelf result", "err", err)
+	return err
+}
+
+// ---- Reading-progress methods ----------------------------------------------
+
+// UpdateProgress records where the user stopped reading for a given book.
+func (a *App) UpdateProgress(bookID string, chapterIndex int, itemID string) error {
+	slog.Info("UpdateProgress called", "bookID", bookID, "chapterIndex", chapterIndex)
+	err := a.store.UpdateProgress(bookID, chapterIndex, itemID)
+	slog.Info("UpdateProgress result", "err", err)
+	return err
+}
+
+// GetProgress returns the last reading position for a book.
+func (a *App) GetProgress(bookID string) (storage.ReadingProgress, error) {
+	slog.Info("GetProgress called", "bookID", bookID)
+	prog, err := a.store.GetProgress(bookID)
+	slog.Info("GetProgress result", "chapterIndex", prog.ChapterIndex, "err", err)
+	return prog, err
+}
+
+// ---- Settings methods ------------------------------------------------------
+
+// GetSetting reads a user preference by key.
+func (a *App) GetSetting(key string) (string, error) {
+	return a.store.GetSetting(key)
+}
+
+// SetSetting writes a user preference.
+func (a *App) SetSetting(key, value string) error {
+	return a.store.SetSetting(key, value)
 }

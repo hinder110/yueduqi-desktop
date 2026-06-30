@@ -3,6 +3,7 @@ package parser
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 
@@ -28,7 +29,10 @@ func GetHotBooks(ctx context.Context) ([]model.Book, error) {
 			"page":       {"1"},
 		}.Encode()
 
-		req, _ := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("creating discover request: %w", err)
+		}
 		resp, err := httpClient.Do(req)
 		if err != nil {
 			return nil, err
